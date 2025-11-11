@@ -25,6 +25,8 @@ from src.data_processing.csv_loader import CSVLoader
 from src.data_processing.data_cleaner import DataCleaner
 from src.data_processing.price_selector import PriceSelector
 from src.data_processing.data_quality_scorer import DataQualityScorer
+from src.data_processing.remediation_engine import RemediationEngine
+from src.data_processing.energy_reconciliation import EnergyReconciliation
 
 
 def main():
@@ -93,6 +95,12 @@ Examples:
         data_cleaner = DataCleaner(config_dict, dq_rules)
         price_selector = PriceSelector(price_rules)
         dq_scorer = DataQualityScorer(config_dict, dq_rules, asset_config)
+        settlement_duration_min = config_dict['market']['settlement_duration_min']
+        remediation_engine = RemediationEngine(dq_rules, settlement_duration_min)
+        energy_recon = EnergyReconciliation(
+            capacity_mwh=asset_config['capacity_mwh'],
+            tolerance_percent=dq_rules['remediation_policies']['scada']['energy_reconciliation']['tolerance_percent']
+        )
 
         # STEP 1: Load CSV files
         print("\n" + "="*80)
@@ -162,36 +170,85 @@ Examples:
         # Check if both passed
         both_passed = scada_dq_report.passed and market_dq_report.passed
 
-        if not both_passed:
-            print("\n❌ DATA QUALITY CHECK FAILED")
+        # Re-ingestion workflow with max iterations
+        if not both_passed and args.remediate:
+            print("\n🔧 DATA QUALITY CHECK FAILED - STARTING REMEDIATION WORKFLOW")
             print(f"   SCADA DQ: {scada_dq_report.overall_score:.1f}% {'✅' if scada_dq_report.passed else '❌'}")
             print(f"   Market DQ: {market_dq_report.overall_score:.1f}% {'✅' if market_dq_report.passed else '❌'}")
+            print(f"   Max iterations: {args.max_iterations}")
+            print()
 
-            if args.remediate and (scada_dq_report.can_auto_remediate or market_dq_report.can_auto_remediate):
-                print("\n🔧 Attempting automatic remediation...")
-                # Apply remediation
-                if scada_dq_report.can_auto_remediate:
-                    scada_aligned = data_cleaner.interpolate_missing(scada_aligned, 'scada')
-                    # Re-score
-                    scada_dq_report = dq_scorer.score_scada(scada_aligned)
+            max_iterations = args.max_iterations
+            iteration = 0
 
-                if market_dq_report.can_auto_remediate:
-                    market_selected = data_cleaner.interpolate_missing(market_selected, 'market')
-                    # Re-score
-                    market_dq_report = dq_scorer.score_market(market_selected)
+            while iteration < max_iterations and not both_passed:
+                iteration += 1
+                print(f"{'='*80}")
+                print(f"REMEDIATION ITERATION {iteration}/{max_iterations}")
+                print(f"{'='*80}")
 
-                # Re-check
+                # Apply SCADA remediation if needed
+                if not scada_dq_report.passed and scada_dq_report.can_auto_remediate:
+                    print("\n🔧 Applying SCADA remediation...")
+                    scada_aligned, scada_success, scada_log = remediation_engine.remediate_scada(
+                        scada_aligned.set_index('timestamp_utc') if 'timestamp_utc' in scada_aligned.columns else scada_aligned,
+                        scada_dq_report
+                    )
+                    scada_aligned = scada_aligned.reset_index()
+
+                    # Print remediation log
+                    for log_entry in scada_log:
+                        print(f"   {log_entry}")
+
+                    if scada_success:
+                        # Re-score after remediation
+                        scada_dq_report = dq_scorer.score_scada(scada_aligned)
+                        print(f"\n✅ SCADA DQ after remediation: {scada_dq_report.overall_score:.1f}% {'✅' if scada_dq_report.passed else '❌'}")
+                    else:
+                        print(f"\n❌ SCADA remediation failed")
+                elif not scada_dq_report.passed:
+                    print(f"\n⚠️  SCADA DQ failed but cannot auto-remediate")
+
+                # Apply market remediation if needed
+                if not market_dq_report.passed and market_dq_report.can_auto_remediate:
+                    print("\n🔧 Applying market remediation...")
+                    market_selected, market_success, market_log = remediation_engine.remediate_market(
+                        market_selected.set_index('timestamp_utc') if 'timestamp_utc' in market_selected.columns else market_selected,
+                        market_dq_report
+                    )
+                    market_selected = market_selected.reset_index()
+
+                    # Print remediation log
+                    for log_entry in market_log:
+                        print(f"   {log_entry}")
+
+                    if market_success:
+                        # Re-score after remediation
+                        market_dq_report = dq_scorer.score_market(market_selected)
+                        print(f"\n✅ Market DQ after remediation: {market_dq_report.overall_score:.1f}% {'✅' if market_dq_report.passed else '❌'}")
+                    else:
+                        print(f"\n❌ Market remediation failed")
+                elif not market_dq_report.passed:
+                    print(f"\n⚠️  Market DQ failed but cannot auto-remediate")
+
+                # Check if both passed after this iteration
                 both_passed = scada_dq_report.passed and market_dq_report.passed
 
                 if both_passed:
-                    print("✅ Remediation successful!")
-                else:
-                    print("❌ Remediation failed. Manual intervention required.")
+                    print(f"\n✅ Remediation successful after {iteration} iteration(s)!")
+                    break
+                elif iteration == max_iterations:
+                    print(f"\n❌ Maximum remediation iterations ({max_iterations}) exceeded")
+                    print(f"   Manual intervention required")
                     return 1
-            else:
-                print("\n⚠️  Remediation not enabled or not possible.")
-                print("   Run with --remediate flag or fix data manually.")
-                return 1
+
+        elif not both_passed:
+            print("\n❌ DATA QUALITY CHECK FAILED")
+            print(f"   SCADA DQ: {scada_dq_report.overall_score:.1f}% {'✅' if scada_dq_report.passed else '❌'}")
+            print(f"   Market DQ: {market_dq_report.overall_score:.1f}% {'✅' if market_dq_report.passed else '❌'}")
+            print("\n⚠️  Remediation not enabled.")
+            print("   Run with --remediate flag to apply automatic fixes.")
+            return 1
 
         # STEP 5: Save canonical data
         print("\n" + "="*80)
