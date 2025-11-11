@@ -1,0 +1,52 @@
+# Price Selection Rules
+# Defines which market price stack(s) to use for optimization and revenue calculation
+
+uk_market:
+  optimization_price_source:
+    mode: "day_ahead_only"  # Options: "day_ahead_only", "imbalance_only", "blended"
+    # NOTE: User should confirm which mode to use during Week 0 Prerequisites
+
+  blended_mode:
+    # Only used if mode="blended"
+    enabled: false
+    weights:
+      day_ahead: 0.7
+      imbalance: 0.3
+    aggregation: "weighted_average"  # Options: "weighted_average", "max", "min"
+
+  revenue_calculation:
+    # Which price stack to use for calculating actual vs optimal revenue
+    actual_revenue_price: "imbalance"    # Price for actual dispatch revenue
+    optimal_revenue_price: "day_ahead"   # Price for optimization objective
+    # NOTE: These can be the same or different based on business logic
+
+  fallback:
+    # What to do if primary price source is missing
+    if_day_ahead_missing: "use_imbalance"  # Options: "use_imbalance", "reject"
+    if_imbalance_missing: "use_day_ahead"  # Options: "use_day_ahead", "reject"
+    if_both_missing: "reject"
+
+  validation:
+    required_market_types:
+      - "day_ahead"  # Minimum required price types
+    optional_market_types:
+      - "imbalance"  # Nice to have but not required for MVP
+
+    check_price_alignment: true  # Verify prices align with SCADA timestamps
+    allow_price_interpolation: false  # Don't interpolate missing prices
+
+  price_processing:
+    remove_outliers: false  # Set to true if market has spurious price spikes
+    outlier_threshold_std: 3  # Remove prices >3 std deviations from mean
+    cap_at_market_limits: true  # Cap prices at market_constraints.yaml limits
+
+# Future: Other markets
+# eu_market:
+#   optimization_price_source:
+#     mode: "day_ahead_only"
+#   ...
+
+# us_market:
+#   optimization_price_source:
+#     mode: "lmp_only"  # Locational Marginal Price
+#   ...

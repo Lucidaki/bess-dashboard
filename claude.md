@@ -351,4 +351,130 @@ Recommend optimal dispatch strategy for next 24 hours.
 
 ---
 
+## MVP IMPLEMENTATION DECISIONS
+
+### V1 MVP Scope (Approved: 2025-11-11)
+
+**In-Scope**:
+- ✅ BESS-only optimization (Solar/Hybrid deferred to V2)
+- ✅ UK market focus (30-minute settlement periods)
+- ✅ CSV-based data sources (SCADA + market prices)
+- ✅ Dual stakeholder focus: Finance (revenue analytics) + O&M (operational metrics)
+- ✅ Configuration-first architecture (zero hardcoded values)
+- ✅ Data quality gating (DQ ≥80% enforcement)
+- ✅ Full regulatory compliance (degradation, warranty, settlement constraints)
+
+**Out-of-Scope (Post-MVP)**:
+- ❌ Live market data API integration (N2EX, BM) - deferred to Phase 9
+- ❌ Solar PV module - deferred to Phase 10
+- ❌ Hybrid PV-BESS optimization - deferred to Phase 11
+- ❌ Multi-asset portfolio optimization - deferred to Phase 12
+- ❌ Database integration (TimescaleDB) - deferred to Phase 13
+- ❌ FastAPI REST endpoints
+- ❌ Cloud deployment (AWS/Oracle) - deferred to Phase 14
+
+### Critical Design Decisions
+
+**1. Market Data Source: CSV (Not API)**
+- **Decision Date**: 2025-11-11
+- **Rationale**: De-risk MVP, focus on core optimization logic, eliminate external dependencies
+- **Implementation**:
+  - SCADA data provided as CSV (timestamp_utc, power_mw, soc_percent)
+  - Market price data provided as CSV (timestamp_utc, price_gbp_mwh, market_type)
+  - Live API integration deferred to post-MVP enhancement
+  - Data abstraction layer allows easy API integration later (config.market.data_source: "csv" → "api")
+- **Files**:
+  - `config/price_selection_rules.yaml` - Defines price stack selection logic
+  - `src/data_processing/csv_loader.py` - Generic CSV ingestion
+  - Future: `src/data_processing/api_client.py` - N2EX/BM API integration
+
+**2. Configuration-First Architecture**
+- **Decision Date**: 2025-11-11
+- **Rationale**: Eliminate all hardcoded values, support multiple markets, enable rapid configuration changes
+- **Implementation**:
+  - All parameters externalized to 5 YAML files (config_schema, market_constraints, dq_remediation_rules, price_selection_rules, acceptance_criteria)
+  - Pydantic validation for all configurations
+  - Anti-hardcoding audit checklist enforced at each phase gate
+- **Files**:
+  - `config/*.yaml` - All configuration files
+  - `src/config_loader.py` - Pydantic-based configuration loader
+
+**3. Data Quality Gating with Auto-Remediation**
+- **Decision Date**: 2025-11-11
+- **Rationale**: Prevent "garbage in, garbage out" optimization, provide operational decision logic
+- **Implementation**:
+  - DQ score ≥80% required to proceed with optimization
+  - Auto-interpolation for gaps ≤60 minutes if completeness ≥95%
+  - Hard reject if completeness <80%
+  - Energy reconciliation validation (±5% tolerance for power integration)
+  - Re-ingestion workflow with max 3 iterations
+- **Files**:
+  - `config/dq_remediation_rules.yaml` - Decision matrix for auto-fix vs reject
+  - `src/data_processing/remediation_engine.py` - Auto-remediation logic
+  - `src/data_processing/energy_reconciliation.py` - Power-to-energy validation
+
+**4. Dual-Stakeholder KPI Focus**
+- **Decision Date**: 2025-11-11
+- **Rationale**: Finance team needs revenue analytics, O&M needs operational metrics
+- **Implementation**:
+  - Finance KPIs: Market Capture Ratio, revenue variance, IRR impact
+  - O&M KPIs: Availability, cycle utilization, actual RTE, degradation tracking
+  - Separate dashboard tabs for each stakeholder
+  - Downloadable reports in stakeholder-specific formats
+- **Files**:
+  - `config/acceptance_criteria.yaml` - Numeric thresholds for each stakeholder
+  - `src/modules/kpi_calculator.py` - Dual KPI calculation engines
+  - `src/ui/finance_tab.py` + `src/ui/om_tab.py` - Stakeholder-specific UIs
+
+**5. Testing at Phase Gates (Not Just End)**
+- **Decision Date**: 2025-11-11
+- **Rationale**: Catch issues early, validate assumptions incrementally, prevent cascading failures
+- **Implementation**:
+  - Unit tests for each module
+  - Integration tests at phase boundaries
+  - Acceptance criteria validation tests
+  - Anti-hardcoding audit automated
+- **Files**:
+  - `tests/test_*.py` - Comprehensive test suite
+  - `tests/test_acceptance_criteria.py` - Numeric threshold validation
+
+### Data Conventions for MVP
+
+**SCADA CSV Format**:
+```csv
+timestamp_utc,power_mw,soc_percent
+2024-01-01T00:00:00Z,-1.5,45.2
+2024-01-01T00:30:00Z,-1.8,52.7
+```
+
+**Market Price CSV Format**:
+```csv
+timestamp_utc,price_gbp_mwh,market_type
+2024-01-01T00:00:00Z,45.50,day_ahead
+2024-01-01T00:30:00Z,48.20,day_ahead
+```
+
+**Power Convention**: Positive = discharge/export, Negative = charge/import (unchanged)
+**Timestamp Format**: ISO8601 UTC (e.g., 2024-01-01T00:00:00Z)
+**Settlement Periods**: 48 per day (30-minute periods for UK)
+**Price Stack**: day_ahead (required), imbalance (optional for V1)
+
+### Timeline
+
+- **Week 0**: Prerequisites (BESS parameters, SCADA/market CSV samples, config approvals)
+- **Week 1**: Core build (data pipeline, optimization, KPIs, visualization)
+- **Week 2**: Dashboard, testing, documentation, deployment
+
+### Success Criteria
+
+- ✅ DQ ≥80% enforcement
+- ✅ Solver convergence <30 seconds
+- ✅ KPI variance ±0.1%
+- ✅ Zero hardcoded values
+- ✅ Finance + O&M acceptance criteria met
+
+See `docs/PROJECT_PLAN.md` for detailed implementation plan.
+
+---
+
 **ACTIVATION PROTOCOL**: This configuration optimizes Claude for the Ampyr Asset Intelligence Platform development. All responses will demonstrate deep understanding of energy markets, optimization algorithms, and modular architecture patterns. Implementation will be direct, complete, and production-ready with full consideration of data quality, performance metrics, and stakeholder requirements.

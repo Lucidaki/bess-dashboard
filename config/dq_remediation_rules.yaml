@@ -1,0 +1,64 @@
+# Data Quality Remediation Rules
+# Defines when to auto-fix vs reject data based on DQ scores
+
+remediation_policies:
+  scada:
+    completeness:
+      threshold_auto_interpolate: 95  # If ≥95% complete → auto-interpolate
+      threshold_reject: 80             # If <80% complete → hard reject
+      max_gap_minutes: 60              # Maximum gap size to interpolate (1 hour)
+      method: "linear"                 # Options: "linear", "forward_fill", "backward_fill"
+
+    continuity:
+      max_single_gap_minutes: 120  # Reject if any single gap >2 hours
+      max_total_gap_percent: 15    # Reject if total gaps >15% of timeline
+
+    bounds:
+      action: "flag_and_continue"     # Out-of-bounds values → warn but allow
+      max_violations_percent: 5        # Reject if >5% of values out of bounds
+      soc_hard_limits:
+        min: 0    # Hard minimum SoC %
+        max: 100  # Hard maximum SoC %
+      power_check_against_rated: true  # Validate power against asset rated capacity
+
+    energy_reconciliation:
+      tolerance_percent: 5          # ±5% metering error acceptable
+      action_on_fail: "reject"      # Reject data if reconciliation fails
+      calculate_confidence: true    # Calculate confidence interval based on error
+
+  market:
+    completeness:
+      threshold_auto_forward_fill: 98  # If ≥98% complete → forward-fill prices
+      threshold_reject: 95              # If <95% complete → hard reject
+      max_gap_periods: 2                # Max consecutive missing price periods
+
+    bounds:
+      action: "reject"  # Price outside caps → hard reject (no tolerance)
+      validate_against_market_caps: true
+
+    continuity:
+      required_settlement_count: 48  # Must have 48 periods for daily optimization
+      allow_partial_days: false      # Don't allow partial day optimization
+
+cross_validation:
+  timestamp_overlap_required: 100  # Must have 100% timestamp overlap between SCADA and market
+  action_on_mismatch: "reject"
+  timezone_consistency_check: true
+
+re_ingestion:
+  max_iterations: 3      # Maximum number of auto-remediation attempts
+  auto_apply_fixes: true  # Automatically apply fixes within thresholds
+  generate_report: true   # Generate detailed remediation report
+
+  escalation:
+    if_iterations_exceeded: "reject_with_manual_guidance"
+    if_critical_failure: "reject_immediately"
+
+remediation_priority:
+  # Order in which remediation steps are applied
+  - "timezone_validation"
+  - "bounds_checking"
+  - "continuity_analysis"
+  - "interpolation"
+  - "energy_reconciliation"
+  - "cross_validation"

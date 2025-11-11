@@ -1,0 +1,114 @@
+# Acceptance Criteria
+# Defines numeric thresholds for Finance and O&M stakeholders
+# NOTE: Finance/O&M teams should review and approve these values during Week 0
+
+finance_acceptance:
+  kpi_variance_tolerance:
+    market_capture_ratio: 0.1    # ±0.1% acceptable variance
+    revenue_calculation: 0.01     # ±£0.01 acceptable (to pence precision)
+    arbitrage_efficiency: 0.1     # ±0.1% acceptable variance
+
+  revenue_buckets:
+    # Market Capture Ratio performance bands
+    excellent: [90, 100]  # 90-100% market capture
+    good: [75, 90]        # 75-90% market capture
+    acceptable: [60, 75]  # 60-75% market capture
+    poor: [0, 60]         # <60% market capture
+
+  report_requirements:
+    variance_explanation_mandatory_if_mcr_below: 80  # Explain if MCR <80%
+    download_formats:
+      - "csv"
+      - "xlsx"
+    decimal_precision: 2  # Round to 2 decimal places (pence)
+    include_confidence_intervals: true
+
+  irr_impact:
+    discount_rate_percent: 8.0  # Discount rate for IRR calculations
+    project_lifetime_years: 20   # Expected asset lifetime
+
+om_acceptance:
+  kpi_ranges:
+    availability:
+      target: 95         # Target availability %
+      acceptable_min: 90  # Minimum acceptable %
+      alert_threshold: 85  # Alert if below this %
+
+    cycle_utilization:
+      target: 80         # Target cycle utilization %
+      acceptable_min: 60  # Minimum acceptable %
+      alert_if_above: 95  # Alert if overutilizing (degradation risk)
+
+    actual_rte:
+      # Acceptable range for actual RTE (assuming 85% rated)
+      acceptable_range: [82, 88]  # ±3% from rated 85%
+      deviation_alert: 3           # Alert if >3% deviation from rated
+      calculate_degradation_impact: true
+
+    throughput:
+      min_daily_mwh: 5.0  # Minimum expected daily throughput (asset-specific)
+      alert_if_below: 3.0  # Alert if throughput very low
+
+    capacity_factor:
+      target: 25  # Target capacity factor % (BESS-specific, lower than solar)
+      acceptable_min: 15
+
+  export_requirements:
+    formats:
+      - "csv"
+    include_raw_timeseries: true
+    timestamp_format: "ISO8601"
+    include_metadata: true
+
+  degradation_tracking:
+    track_capacity_fade: true
+    expected_annual_fade_percent: 2.0  # Should match config_schema.yaml
+    alert_if_exceeds_expected: true
+
+performance:
+  solver_convergence:
+    time_limit_sec: 30           # Maximum solver time
+    acceptable_gap_percent: 1.0   # MIP gap tolerance
+    require_optimal_status: true  # Don't accept suboptimal solutions
+
+  data_pipeline:
+    max_ingestion_time_sec: 60   # CSV loading and validation
+    max_cleaning_time_sec: 30     # Data cleaning and resampling
+    max_optimization_time_sec: 30  # Optimization solve time
+
+  visualization:
+    max_chart_render_sec: 2.0      # Each chart must render in <2 seconds
+    dashboard_initial_load_sec: 5.0  # Full dashboard initial load
+    max_download_time_sec: 10.0     # Report download generation
+
+data_quality:
+  scada_requirements:
+    min_overall_dq: 80          # Minimum overall DQ score
+    min_completeness: 85         # Minimum completeness %
+    min_continuity: 90           # Minimum continuity %
+    max_bounds_violations_percent: 5  # Max % of out-of-bounds values
+    min_energy_reconciliation: 95    # Energy balance must reconcile
+
+  market_requirements:
+    min_overall_dq: 95           # Higher bar for price data
+    min_completeness: 98          # Prices must be very complete
+    required_settlement_count: 48  # Full day for UK (30-min periods)
+    validate_price_caps: true     # Prices within market_constraints limits
+
+testing:
+  unit_tests:
+    min_coverage_percent: 80  # Minimum code coverage
+
+  integration_tests:
+    required_scenarios:
+      - "normal_operation"
+      - "low_dq_rejection"
+      - "solver_timeout"
+      - "missing_price_data"
+
+  performance_tests:
+    max_memory_mb: 1000  # Maximum memory usage
+    test_dataset_sizes:
+      - "1_day"
+      - "7_days"
+      - "30_days"

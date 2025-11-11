@@ -1,0 +1,71 @@
+# BESS Dashboard MVP Configuration
+# Version: 1.0.0
+
+project:
+  name: "BESS Dashboard MVP"
+  version: "1.0.0"
+  description: "Ampyr Asset Intelligence Platform - BESS Optimization"
+
+market:
+  name: "UK"
+  settlement_duration_min: 30  # UK-specific 30-minute settlement periods
+  timezone: "Europe/London"
+  currency: "GBP"
+  data_source: "csv"  # Options: "csv", "api" (future)
+
+bess_assets:
+  UK_BESS_001:
+    # NOTE: These are placeholder values - replace with actual BESS parameters
+    # User must provide these values before Day 1 (Week 0 Prerequisites)
+    capacity_mwh: 5.0           # Total energy capacity in MWh
+    power_mw: 2.5               # Maximum charge/discharge power in MW
+    rte_percent: 85.0           # Round-trip efficiency percentage
+
+    constraints:
+      soc_min_percent: 10.0     # Minimum State of Charge (%)
+      soc_max_percent: 95.0     # Maximum State of Charge (%)
+
+    degradation:
+      annual_fade_percent: 2.0  # Annual capacity degradation rate
+      model: "linear"           # Options: "linear", "piecewise"
+
+    warranty:
+      max_lifetime_cycles: 6000      # Total lifetime cycle limit
+      max_daily_cycles: 2.5          # Maximum cycles per day
+
+    grid_code:
+      frequency_response_hold_min: null  # Set if applicable (e.g., 30)
+      ramp_rate_mw_per_min: null         # Set if applicable (e.g., 0.5)
+
+data_quality:
+  min_dq_score: 80  # Minimum overall DQ score to proceed with optimization
+  remediation: "interpolate"  # Options: "interpolate", "reject"
+
+  weights:
+    completeness: 0.4
+    continuity: 0.3
+    bounds: 0.2
+    energy_reconciliation: 0.1
+
+optimization:
+  solver: "PULP_CBC_CMD"  # PuLP solver backend
+  time_limit_sec: 30      # Maximum solver time
+  mip_gap_tolerance: 0.01  # MIP gap tolerance (1%)
+  objective: "maximize_revenue"
+
+visualization:
+  theme: "plotly_white"  # Plotly theme
+
+  color_palette:
+    primary: "#1f77b4"     # Blue
+    secondary: "#ff7f0e"   # Orange
+    success: "#2ca02c"     # Green
+    warning: "#ff9800"     # Amber
+    danger: "#d62728"      # Red
+    neutral: "#7f7f7f"     # Gray
+
+  chart_config:
+    font_size: 12
+    title_font_size: 14
+    show_grid: true
+    margin_px: 50

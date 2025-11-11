@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(for file in setup.py setup.cfg pyproject.toml .env .env.example config.yaml config.yml package.json)",
+      "Bash(do test -f \"/c/repos/bess-dashboard/bess-dashboard/$file\")",
+      "Bash(echo:*)",
+      "Bash(done)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
