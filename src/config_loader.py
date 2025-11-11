@@ -18,6 +18,8 @@ class BESSAssetConfig(BaseModel):
     class ConstraintsConfig(BaseModel):
         soc_min_percent: float = Field(ge=0, le=100)
         soc_max_percent: float = Field(ge=0, le=100)
+        power_export_max_mw: float = Field(gt=0, description="Maximum export/discharge power (MW)")
+        power_import_max_mw: float = Field(gt=0, description="Maximum import/charge power (MW)")
 
         @validator('soc_max_percent')
         def max_greater_than_min(cls, v, values):

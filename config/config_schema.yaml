@@ -15,23 +15,26 @@ market:
 
 bess_assets:
   UK_BESS_001:
-    # NOTE: These are placeholder values - replace with actual BESS parameters
-    # User must provide these values before Day 1 (Week 0 Prerequisites)
-    capacity_mwh: 5.0           # Total energy capacity in MWh
-    power_mw: 2.5               # Maximum charge/discharge power in MW
-    rte_percent: 85.0           # Round-trip efficiency percentage
+    # ACTUAL BESS PARAMETERS - Updated 2025-11-11
+    capacity_mwh: 8.4           # Useable energy capacity in MWh
+    power_mw: 7.5               # Maximum power rating in MW (nameplate)
+    rte_percent: 87.0           # Round-trip efficiency percentage
 
     constraints:
-      soc_min_percent: 10.0     # Minimum State of Charge (%)
+      soc_min_percent: 5.0      # Minimum State of Charge (%)
       soc_max_percent: 95.0     # Maximum State of Charge (%)
 
+      # Asymmetric network constraints (important for optimization)
+      power_export_max_mw: 7.5  # Maximum export to grid (discharge) in MW
+      power_import_max_mw: 4.2  # Maximum import from grid (charge) in MW
+
     degradation:
-      annual_fade_percent: 2.0  # Annual capacity degradation rate
+      annual_fade_percent: 2.5  # Annual capacity degradation rate (2.5-3% range)
       model: "linear"           # Options: "linear", "piecewise"
 
     warranty:
-      max_lifetime_cycles: 6000      # Total lifetime cycle limit
-      max_daily_cycles: 2.5          # Maximum cycles per day
+      max_lifetime_cycles: 8200      # Total lifetime cycle limit (1.5 cycles/day × 365 days × 15 years)
+      max_daily_cycles: 1.5          # Maximum cycles per day
 
     grid_code:
       frequency_response_hold_min: null  # Set if applicable (e.g., 30)
