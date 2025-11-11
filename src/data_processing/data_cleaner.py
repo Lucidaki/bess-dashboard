@@ -53,7 +53,7 @@ class DataCleaner:
             return df.reset_index()
 
         # Resample rule
-        resample_rule = f"{self.settlement_duration_min}T"  # T = minute frequency
+        resample_rule = f"{self.settlement_duration_min}min"  # min = minute frequency
 
         # Resample different columns appropriately
         resampled = pd.DataFrame()
