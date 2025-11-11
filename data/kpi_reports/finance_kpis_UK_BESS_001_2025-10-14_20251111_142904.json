@@ -1,0 +1,21 @@
+{
+  "market_capture_ratio": -4.5778645383427445,
+  "revenue_variance_gbp": 2433.2897204026003,
+  "revenue_variance_percent": 104.57786453834275,
+  "arbitrage_revenue_gbp": -106.51652499999997,
+  "optimal_revenue_gbp": 2326.7731954026003,
+  "revenue_per_cycle_gbp": -58.04024931077354,
+  "lost_opportunity_gbp": 2433.2897204026003,
+  "revenue_per_discharge_mwh": -6.909553489377802,
+  "average_discharge_price_gbp_mwh": 100.9306778744797,
+  "irr_impact_estimate_bps": 1879.6841226390457,
+  "revenue_per_capacity_mwh": -12.680538690476187,
+  "finance_grade": "F",
+  "average_charge_price_gbp_mwh": 71.22737932019425,
+  "price_spread_captured_gbp_mwh": 29.703298554285453,
+  "market_price_mean": 88.7521111111111,
+  "market_price_std": 32.35500529134938,
+  "market_price_min": 66.53,
+  "market_price_max": 264.0,
+  "market_price_spread": 197.47
+}
