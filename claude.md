@@ -91,7 +91,7 @@ python optimize_bess.py --scada-file data/canonical/scada_UK_BESS_001_2025-10-14
 # KPI Calculation
 python calculate_kpis.py --summary-file data/optimization_results/summary_UK_BESS_001_2025-10-14.json --schedule-file data/optimization_results/schedule_UK_BESS_001_2025-10-14.csv --stakeholder both
 
-# Streamlit Dashboard (Phase 6 - Not yet implemented)
+# Streamlit Dashboard (✅ Complete with CSV upload integration)
 streamlit run app.py
 ```
 
@@ -148,6 +148,24 @@ pytest tests/test_hybrid_routing.py -v  # Test routing policies
 - **Energy Units**: MW for power, MWh for energy
 - **Currency**: GBP/MWh for UK, EUR/MWh for EU, USD/MWh for US
 - **Efficiency**: Percentage format (0-100)
+- **Price Bounds**: -£1,000 to £6,000/MWh (UK) - **Negative prices are economically valid**
+  - Negative prices occur when excess renewable generation floods the market
+  - BESS gets PAID to charge during negative prices (excellent opportunity)
+  - BESS PAYS to discharge during negative prices (avoid this)
+  - Validation: Use `market_constraints.yaml` price caps, NOT hard-coded positive checks
+
+**Critical Data Structure Patterns**:
+- **Pydantic v2**: Always use `.model_dump()` for serialization, NOT `.to_dict()`
+- **ConfigLoader**: Use `load_all_configs()` then access dict, NOT individual getters
+- **Optimization Summary**: Flat structure matching CLI tools (optimize_bess.py format)
+  - Top-level: `actual_revenue_gbp`, `optimal_revenue_gbp`, `cycles_used`, etc.
+  - Nested: `actual_performance` dict for detailed metrics
+  - NOT nested: ~~`actual['revenue_gbp']`~~ or ~~`optimal['revenue_gbp']`~~
+- **DQ Reports**: Use schema fields from `schemas.py`
+  - Top-level metadata: `valid_periods`, `total_periods`, `missing_periods`
+  - Component details from `issues` lists, NOT non-existent nested fields
+- **BESSOptimizer**: Parameter is `solver_timeout_sec` NOT `timeout`
+- **CSV Column Names**: Input requires `timestamp`, system converts to `timestamp_utc` internally
 
 ## TOOL CALL OPTIMIZATION
 

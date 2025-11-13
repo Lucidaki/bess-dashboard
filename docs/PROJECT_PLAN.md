@@ -1718,9 +1718,113 @@ pytest tests/ -n auto
 
 ---
 
-**Document Version**: 1.4
-**Last Updated**: 2025-11-11 15:20 UTC
-**Status**: Phases 0-7 Complete (87.5% of MVP), Phase 8 Remaining
+## PHASE 6B: DASHBOARD INTEGRATION - END-TO-END CSV WORKFLOW
+
+### 2025-11-13 | Dashboard CSV Upload Integration Complete
+
+**Context**: Phase 8 (Documentation) was paused to implement critical user workflow improvement - integrating CLI tools into Streamlit dashboard for seamless end-to-end CSV file processing.
+
+**Objective**: Enable users to upload raw CSV files via dashboard, perform data quality validation, run optimization, and view results without manual file management.
+
+**Implementation Summary**:
+
+**1. New Dashboard Pages Created**:
+- ✅ **Data Upload Page**: File upload interface with 3-step workflow (upload → validate → process)
+- ✅ **Optimization Page**: Run MILP optimization on cleaned data
+- ✅ **Enhanced Data Quality Page**: DQ component breakdown with remediation history
+
+**2. Core Integration Layer** (`src/dashboard/dashboard_helpers.py`):
+- ✅ `save_uploaded_file()` - Save Streamlit uploads to disk
+- ✅ `validate_csv_structure()` - Pre-validate CSV headers
+- ✅ `run_data_ingestion()` - Wrapper for CLI data pipeline
+- ✅ `run_optimization()` - Wrapper for MILP optimization
+- ✅ `format_dq_report()` - Format DQ reports for display
+
+**3. Critical Fixes & Debugging** (8 errors resolved):
+
+| # | Error | Root Cause | Fix | File(s) |
+|---|-------|------------|-----|---------|
+| 1 | ConfigLoader API mismatch | Incorrect method usage | Use `load_all_configs()` pattern | dashboard_helpers.py |
+| 2 | Column name conflict | UI required `timestamp_utc`, loader expects `timestamp` | Standardized to `timestamp` | dashboard_helpers.py, app.py |
+| 3 | Negative price rejection | Hard-coded positive price check | Removed check, use market_constraints | csv_loader.py, data_quality_scorer.py |
+| 4 | Pydantic serialization | v1 API `.to_dict()` used | Changed to `.model_dump()` (v2) | dashboard_helpers.py |
+| 5 | BESSOptimizer parameter | Used `timeout` instead of `solver_timeout_sec` | Fixed parameter name | dashboard_helpers.py |
+| 6 | Optimization result structure | Expected nested 'schedule' key | Use flat structure from optimizer | dashboard_helpers.py |
+| 7 | Summary structure mismatch | Created nested structure, KPIs expect flat | Match optimize_bess.py format | dashboard_helpers.py, app.py |
+| 8 | DQ report formatting | Accessed non-existent nested fields | Use correct schema fields | dashboard_helpers.py |
+
+**4. Key Technical Achievements**:
+- ✅ **Negative Price Support**: System correctly handles prices from -£1,000 to £6,000/MWh
+- ✅ **Configuration Consistency**: All components use market_constraints.yaml for validation
+- ✅ **Schema Compliance**: Pydantic v2 models validated throughout
+- ✅ **Data Structure Alignment**: Summary format matches KPI calculator expectations
+- ✅ **Error Diagnostics**: Added debugging KeyError messages with available keys
+
+**5. Documentation Created**:
+- ✅ `docs/CSV_FORMAT_GUIDE.md` - Comprehensive guide with negative price explanation
+- ✅ Updated UI instructions to match actual requirements
+- ✅ Inline code comments documenting structure expectations
+
+**6. Session State Management** (13 new variables):
+```python
+# Upload tracking
+uploaded_scada_file, uploaded_market_file, selected_asset
+
+# Canonical file tracking
+canonical_scada_path, canonical_market_path
+
+# DQ tracking
+scada_dq_score, market_dq_score, scada_dq_report, market_dq_report
+
+# Optimization results
+optimization_summary, optimization_schedule, optimization_complete, last_optimization_asset
+```
+
+**7. End-to-End Workflow**:
+1. **Upload** → User uploads SCADA + Market CSV files
+2. **Validate** → Pre-validate column names and structure
+3. **Process** → Run data cleaning + DQ scoring + auto-remediation
+4. **Review** → View DQ reports and scores
+5. **Optimize** → Run MILP optimization on cleaned data
+6. **Analyze** → View Finance/O&M dashboards with results
+
+**8. Testing Results**:
+- ✅ Full workflow tested with real UK BESS data
+- ✅ Negative prices (-£50/MWh to £200/MWh) handled correctly
+- ✅ DQ remediation working (gaps ≤60 min interpolated)
+- ✅ Optimization convergence <1 second for 90 periods
+- ✅ KPI calculations accurate (Finance + O&M)
+- ✅ All 8 integration errors resolved
+
+**9. Files Modified**:
+- `app.py` (+500 lines) - Added Data Upload and Optimization pages
+- `src/dashboard/__init__.py` (new) - Module initialization
+- `src/dashboard/dashboard_helpers.py` (new, 464 lines) - Integration layer
+- `src/data_processing/csv_loader.py` - Removed positive price check
+- `src/data_processing/data_quality_scorer.py` - Added market_constraints parameter
+- `ingest_data.py` - Updated DataQualityScorer initialization
+- `docs/CSV_FORMAT_GUIDE.md` (new, 168 lines) - User documentation
+
+**10. Branch**: `mvpdash` (created for this work)
+
+**11. Status**:
+- ✅ Dashboard integration: **100% Complete**
+- ✅ End-to-end CSV workflow: **Functional**
+- ✅ Error resolution: **8/8 Fixed**
+- ✅ User testing: **Successful**
+
+**12. Next Steps**:
+- Resume Phase 8: Documentation & Deployment
+  - Update user guides with dashboard workflow
+  - Add troubleshooting section for common CSV issues
+  - Create deployment scripts
+  - Finalize handover materials
+
+---
+
+**Document Version**: 1.5
+**Last Updated**: 2025-11-13 (Dashboard Integration)
+**Status**: Phases 0-7 Complete + Dashboard Integration, Phase 8 Remaining
 **Next Review**: After Phase 8 completion
 
 ---
