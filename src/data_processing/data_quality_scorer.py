@@ -19,7 +19,7 @@ class DataQualityScorer:
     Calculate comprehensive data quality scores
     """
 
-    def __init__(self, config, dq_rules, asset_config):
+    def __init__(self, config, dq_rules, asset_config, market_constraints=None):
         """
         Initialize DQ scorer
 
@@ -27,10 +27,12 @@ class DataQualityScorer:
             config: Main configuration
             dq_rules: Data quality remediation rules
             asset_config: BESS asset configuration
+            market_constraints: Market constraints (optional, contains price caps)
         """
         self.config = config
         self.dq_rules = dq_rules
         self.asset_config = asset_config
+        self.market_constraints = market_constraints
         self.dq_config = config['data_quality']
         self.settlement_duration_min = config['market']['settlement_duration_min']
 
@@ -352,10 +354,20 @@ class DataQualityScorer:
         return DQComponent(score=score, passed=passed, issues=issues)
 
     def _score_market_bounds(self, df: pd.DataFrame) -> DQComponent:
-        """Calculate market price bounds score"""
-        # This would check against market_constraints.yaml price caps
-        # For now, just check for positive prices
-        violations = (df['price_gbp_mwh'] <= 0).sum()
+        """Calculate market price bounds score against market constraints"""
+        # Check against market_constraints.yaml price caps
+        # Default to reasonable bounds if not provided
+        if self.market_constraints and 'uk_balancing_mechanism' in self.market_constraints:
+            price_caps = self.market_constraints['uk_balancing_mechanism']['price_caps']
+            min_price = price_caps['min_gbp_per_mwh']  # e.g., -1000
+            max_price = price_caps['max_gbp_per_mwh']  # e.g., 6000
+        else:
+            # Default bounds (allow negative prices!)
+            min_price = -1000
+            max_price = 6000
+
+        # Count violations outside market constraints
+        violations = ((df['price_gbp_mwh'] < min_price) | (df['price_gbp_mwh'] > max_price)).sum()
         total = len(df)
 
         score = max(0, 100 - (violations / total * 100)) if total > 0 else 100
@@ -363,7 +375,7 @@ class DataQualityScorer:
 
         issues = []
         if violations > 0:
-            issues.append(f"{violations} non-positive price values found")
+            issues.append(f"{violations} price values outside market constraints (£{min_price} to £{max_price}/MWh)")
 
         return DQComponent(score=score, passed=passed, issues=issues)
 

@@ -212,12 +212,11 @@ class CSVLoader:
                 issues.append(f"soc_percent has {invalid_count} values outside 0-100% range")
 
         elif data_type == 'market':
-            # Check price_gbp_mwh is numeric and positive
+            # Check price_gbp_mwh is numeric (negative prices are valid!)
             if not pd.api.types.is_numeric_dtype(df['price_gbp_mwh']):
                 issues.append("price_gbp_mwh must be numeric")
-            elif (df['price_gbp_mwh'] <= 0).any():
-                invalid_count = (df['price_gbp_mwh'] <= 0).sum()
-                issues.append(f"price_gbp_mwh has {invalid_count} non-positive values")
+            # Note: Price bounds are validated later by data_quality_scorer against market_constraints.yaml
+            # Negative prices are economically valid (e.g., excess renewable generation)
 
             # Check market_type is valid
             valid_types = {'day_ahead', 'imbalance', 'blended'}

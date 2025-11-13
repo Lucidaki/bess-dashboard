@@ -172,7 +172,7 @@ def show_data_upload():
 
     with col1:
         st.markdown("**SCADA Data (CSV)**")
-        st.markdown("Required columns: `timestamp_utc`, `power_mw`, `soc_percent`")
+        st.markdown("Required columns: `timestamp`, `power_mw`, `soc_percent`")
         scada_file = st.file_uploader(
             "Upload SCADA CSV",
             type=['csv'],
@@ -185,7 +185,7 @@ def show_data_upload():
 
     with col2:
         st.markdown("**Market Price Data (CSV)**")
-        st.markdown("Required columns: `timestamp_utc`, `price_gbp_mwh`, `market_type`")
+        st.markdown("Required columns: `timestamp`, `price_gbp_mwh`, `market_type`")
         market_file = st.file_uploader(
             "Upload Market Price CSV",
             type=['csv'],
@@ -484,8 +484,8 @@ def show_optimization():
                     st.metric("Solve Time", f"{result.solve_time:.2f}s")
 
                 with col3:
-                    actual_revenue = result.summary['actual']['revenue_gbp']
-                    optimal_revenue = result.summary['optimal']['revenue_gbp']
+                    actual_revenue = result.summary['actual_revenue_gbp']
+                    optimal_revenue = result.summary['optimal_revenue_gbp']
                     st.metric("Actual Revenue", f"£{actual_revenue:,.0f}")
 
                 with col4:
@@ -501,14 +501,14 @@ def show_optimization():
                 with col1:
                     st.markdown("**Actual Performance**")
                     st.markdown(f"- Revenue: £{actual_revenue:,.2f}")
-                    st.markdown(f"- Cycles: {result.summary['actual']['cycles']:.2f}")
-                    st.markdown(f"- Discharge: {result.summary['actual']['discharge_energy_mwh']:.2f} MWh")
+                    st.markdown(f"- Cycles: {result.summary['actual_performance']['cycles_used']:.2f}")
+                    st.markdown(f"- Discharge: {result.summary['actual_performance']['discharge_energy_mwh']:.2f} MWh")
 
                 with col2:
                     st.markdown("**Optimal Performance**")
                     st.markdown(f"- Revenue: £{optimal_revenue:,.2f}")
-                    st.markdown(f"- Cycles: {result.summary['optimal']['cycles']:.2f}")
-                    st.markdown(f"- Discharge: {result.summary['optimal']['discharge_energy_mwh']:.2f} MWh")
+                    st.markdown(f"- Cycles: {result.summary['cycles_used']:.2f}")
+                    st.markdown(f"- Discharge: {result.summary['optimal_discharge_energy_mwh']:.2f} MWh")
 
                 st.info("👉 View detailed analysis in **Finance Dashboard** and **O&M Dashboard** pages")
 

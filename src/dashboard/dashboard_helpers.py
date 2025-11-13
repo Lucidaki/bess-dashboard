@@ -89,19 +89,24 @@ def validate_csv_structure(file_path: Path, csv_type: str) -> Tuple[bool, str]:
         Tuple of (is_valid, error_message)
     """
     try:
-        df = pd.read_csv(file_path, nrows=5)  # Just check header
+        df = pd.read_csv(file_path, nrows=5, encoding='utf-8-sig')  # Just check header
+
+        # Normalize column names (lowercase, strip whitespace) - matches CSVLoader behavior
+        df.columns = df.columns.str.strip().str.lower()
 
         if csv_type == 'scada':
-            required_cols = ['timestamp_utc', 'power_mw', 'soc_percent']
+            # CSVLoader expects 'timestamp' (not 'timestamp_utc')
+            required_cols = ['timestamp', 'power_mw', 'soc_percent']
             missing = [col for col in required_cols if col not in df.columns]
             if missing:
-                return False, f"Missing required columns: {', '.join(missing)}"
+                return False, f"Missing required columns: {', '.join(missing)}. Found: {list(df.columns)}"
 
         elif csv_type == 'market':
-            required_cols = ['timestamp_utc', 'price_gbp_mwh', 'market_type']
+            # CSVLoader expects 'timestamp' (not 'timestamp_utc')
+            required_cols = ['timestamp', 'price_gbp_mwh', 'market_type']
             missing = [col for col in required_cols if col not in df.columns]
             if missing:
-                return False, f"Missing required columns: {', '.join(missing)}"
+                return False, f"Missing required columns: {', '.join(missing)}. Found: {list(df.columns)}"
 
         return True, ""
 
@@ -134,24 +139,30 @@ def run_data_ingestion(
     """
     try:
         # Load configuration
-        config = ConfigLoader()
-        asset_config = config.get_asset_config(asset_name)
-        market_config = config.get_market_config()
-        dq_config = config.get_data_quality_config()
+        config_loader = ConfigLoader()
+        configs = config_loader.load_all_configs()
+
+        config_dict = configs['config'].model_dump()
+        dq_rules = configs['dq_rules']
+        price_rules = configs['price_rules']
+        market_constraints = configs['market_constraints']
+
+        # Get asset config
+        asset_config = config_dict['bess_assets'].get(asset_name)
+        if not asset_config:
+            return IngestionResult(
+                success=False,
+                error_message=f"Asset '{asset_name}' not found in configuration"
+            )
+
+        settlement_duration_min = config_dict['market']['settlement_duration_min']
 
         # Initialize processors
-        csv_loader = CSVLoader(encoding='utf-8-sig')
-        data_cleaner = DataCleaner(
-            settlement_duration_min=market_config['settlement_duration_min'],
-            timezone=market_config['timezone']
-        )
-        price_selector = PriceSelector(config.config)
-        dq_scorer = DataQualityScorer(
-            asset_config=asset_config,
-            market_config=market_config,
-            dq_config=dq_config
-        )
-        remediation_engine = RemediationEngine(config.config)
+        csv_loader = CSVLoader(config_dict)
+        data_cleaner = DataCleaner(config_dict, dq_rules)
+        price_selector = PriceSelector(price_rules)
+        dq_scorer = DataQualityScorer(config_dict, dq_rules, asset_config, market_constraints)
+        remediation_engine = RemediationEngine(dq_rules, settlement_duration_min)
 
         # Load SCADA data
         scada_df = csv_loader.load_scada_csv(scada_path)
@@ -172,7 +183,7 @@ def run_data_ingestion(
             )
 
         # Clean and resample SCADA data
-        scada_df = data_cleaner.resample_scada(scada_df, asset_config['capacity_mwh'])
+        scada_df = data_cleaner.resample_scada(scada_df)
         scada_df = data_cleaner.remove_duplicates(scada_df)
 
         # Clean market data
@@ -195,11 +206,10 @@ def run_data_ingestion(
 
             scada_score = scada_dq_report.overall_score
             market_score = market_dq_report.overall_score
+            both_passed = scada_dq_report.passed and market_dq_report.passed
 
             # Check if DQ passes
-            min_dq_score = dq_config['min_dq_score']
-
-            if scada_score >= min_dq_score and market_score >= min_dq_score:
+            if both_passed:
                 # Success! Save canonical files
                 date_str = scada_df['timestamp_utc'].iloc[0].strftime('%Y-%m-%d')
                 timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -219,8 +229,8 @@ def run_data_ingestion(
                     market_canonical_path=market_output,
                     scada_dq_score=scada_score,
                     market_dq_score=market_score,
-                    scada_dq_report=scada_dq_report.to_dict(),
-                    market_dq_report=market_dq_report.to_dict(),
+                    scada_dq_report=scada_dq_report.model_dump(),
+                    market_dq_report=market_dq_report.model_dump(),
                     remediation_applied=remediation_applied,
                     remediation_messages=remediation_messages
                 )
@@ -231,20 +241,26 @@ def run_data_ingestion(
                     success=False,
                     scada_dq_score=scada_score,
                     market_dq_score=market_score,
-                    scada_dq_report=scada_dq_report.to_dict(),
-                    market_dq_report=market_dq_report.to_dict(),
-                    error_message=f"Data quality failed. SCADA: {scada_score:.1f}%, Market: {market_score:.1f}% (Minimum: {min_dq_score}%)"
+                    scada_dq_report=scada_dq_report.model_dump(),
+                    market_dq_report=market_dq_report.model_dump(),
+                    error_message=f"Data quality failed. SCADA: {scada_score:.1f}% {'✅' if scada_dq_report.passed else '❌'}, Market: {market_score:.1f}% {'✅' if market_dq_report.passed else '❌'}"
                 )
 
             # Apply remediation
-            if scada_score < min_dq_score:
-                scada_df, fixed, messages = remediation_engine.remediate_scada(scada_df, scada_dq_report)
+            if not scada_dq_report.passed and scada_dq_report.can_auto_remediate:
+                # Set index for remediation (it expects indexed dataframe)
+                scada_indexed = scada_df.set_index('timestamp_utc') if 'timestamp_utc' in scada_df.columns else scada_df
+                scada_remediated, fixed, messages = remediation_engine.remediate_scada(scada_indexed, scada_dq_report)
+                scada_df = scada_remediated.reset_index()
                 if fixed:
                     remediation_applied = True
                     remediation_messages.extend([f"[SCADA Iteration {iteration+1}] {msg}" for msg in messages])
 
-            if market_score < min_dq_score:
-                market_df, fixed, messages = remediation_engine.remediate_market(market_df, market_dq_report)
+            if not market_dq_report.passed and market_dq_report.can_auto_remediate:
+                # Set index for remediation (it expects indexed dataframe)
+                market_indexed = market_df.set_index('timestamp_utc') if 'timestamp_utc' in market_df.columns else market_df
+                market_remediated, fixed, messages = remediation_engine.remediate_market(market_indexed, market_dq_report)
+                market_df = market_remediated.reset_index()
                 if fixed:
                     remediation_applied = True
                     remediation_messages.extend([f"[Market Iteration {iteration+1}] {msg}" for msg in messages])
@@ -288,9 +304,19 @@ def run_optimization(
     """
     try:
         # Load configuration
-        config = ConfigLoader()
-        asset_config = config.get_asset_config(asset_name)
-        market_config = config.get_market_config()
+        config_loader = ConfigLoader()
+        configs = config_loader.load_all_configs()
+        config_dict = configs['config'].model_dump()
+
+        # Get asset config
+        asset_config = config_dict['bess_assets'].get(asset_name)
+        if not asset_config:
+            return OptimizationResult(
+                success=False,
+                error_message=f"Asset '{asset_name}' not found in configuration"
+            )
+
+        settlement_duration_min = config_dict['market']['settlement_duration_min']
 
         # Load canonical data
         scada_df = pd.read_csv(scada_file)
@@ -302,9 +328,9 @@ def run_optimization(
         # Initialize optimizer
         optimizer = BESSOptimizer(
             asset_config=asset_config,
-            settlement_duration_min=market_config['settlement_duration_min'],
+            settlement_duration_min=settlement_duration_min,
             solver_name=solver_name,
-            timeout=timeout
+            solver_timeout_sec=timeout
         )
 
         # Calculate actual performance
@@ -316,43 +342,46 @@ def run_optimization(
 
         optimization_result = optimizer.optimize(scada_df, market_df, initial_soc_percent)
 
+        # Calculate optimal discharge and charge energy for summary
+        optimal_power = optimization_result['optimal_power_mw']
+        dt_hours = settlement_duration_min / 60.0
+        optimal_discharge_energy = sum([max(0, p) * dt_hours for p in optimal_power])
+        optimal_charge_energy = sum([abs(min(0, p)) * dt_hours for p in optimal_power])
+
         # Prepare schedule DataFrame
         schedule_df = pd.DataFrame({
             'timestamp_utc': scada_df['timestamp_utc'],
-            'optimal_power_mw': optimization_result['schedule']['power_mw'],
-            'optimal_soc_percent': optimization_result['schedule']['soc_percent'],
+            'optimal_power_mw': optimization_result['optimal_power_mw'],
+            'optimal_soc_percent': optimization_result['optimal_soc_percent'],
             'actual_power_mw': scada_df['power_mw'],
             'actual_soc_percent': scada_df['soc_percent'],
             'price_gbp_mwh': market_df['price_gbp_mwh']
         })
 
-        # Prepare summary dictionary
-        summary = {
-            'asset_name': asset_name,
-            'optimization_date': datetime.now().strftime('%Y-%m-%d'),
-            'solver_status': optimization_result['solver_status'],
-            'solve_time_sec': optimization_result['solve_time_sec'],
-            'actual': actual_perf,
-            'optimal': {
-                'revenue_gbp': optimization_result['revenue_gbp'],
-                'discharge_energy_mwh': optimization_result['discharge_energy_mwh'],
-                'charge_energy_mwh': optimization_result['charge_energy_mwh'],
-                'cycles': optimization_result['cycles'],
-                'soc_min_percent': optimization_result['soc_min_percent'],
-                'soc_max_percent': optimization_result['soc_max_percent']
-            },
-            'comparison': {
-                'revenue_variance_gbp': optimization_result['revenue_gbp'] - actual_perf['revenue_gbp'],
-                'revenue_variance_percent': ((optimization_result['revenue_gbp'] - actual_perf['revenue_gbp']) / optimization_result['revenue_gbp'] * 100) if optimization_result['revenue_gbp'] != 0 else 0
-            },
-            'market': {
-                'price_min_gbp_mwh': float(market_df['price_gbp_mwh'].min()),
-                'price_max_gbp_mwh': float(market_df['price_gbp_mwh'].max()),
-                'price_mean_gbp_mwh': float(market_df['price_gbp_mwh'].mean()),
-                'price_spread_gbp_mwh': float(market_df['price_gbp_mwh'].max() - market_df['price_gbp_mwh'].min())
-            },
-            'asset_config': asset_config
-        }
+        # Prepare summary dictionary to match optimize_bess.py structure
+        # This flat structure is expected by the KPI calculators
+        try:
+            summary = {
+                'asset_name': asset_name,
+                'optimization_date': datetime.now().strftime('%Y-%m-%d'),
+                'timestamp': datetime.now().strftime('%Y%m%d_%H%M%S'),
+                'solver_status': optimization_result['solver_status'],
+                'solve_time_sec': optimization_result['solve_time_sec'],
+                'optimal_revenue_gbp': optimization_result['optimal_revenue_gbp'],
+                'actual_revenue_gbp': optimization_result['actual_revenue_gbp'],
+                'revenue_variance_gbp': optimization_result['revenue_variance_gbp'],
+                'market_capture_ratio': optimization_result['market_capture_ratio'],
+                'cycles_used': optimization_result['cycles_used'],
+                'max_daily_cycles': optimization_result['max_daily_cycles'],
+                'duration_days': optimization_result['duration_days'],
+                'optimal_discharge_energy_mwh': optimal_discharge_energy,
+                'optimal_charge_energy_mwh': optimal_charge_energy,
+                'actual_performance': actual_perf,
+                'asset_config': asset_config
+            }
+        except KeyError as e:
+            available_keys = list(optimization_result.keys())
+            raise KeyError(f"Missing key {e} in optimization_result. Available keys: {available_keys}")
 
         # Save outputs
         date_str = scada_df['timestamp_utc'].iloc[0].strftime('%Y-%m-%d')
