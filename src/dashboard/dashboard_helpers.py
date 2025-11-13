@@ -426,26 +426,38 @@ def format_dq_report(dq_report: Dict) -> Dict[str, Any]:
     if not dq_report:
         return {}
 
+    # Extract component details from issues lists
+    completeness_details = ', '.join(dq_report['completeness']['issues']) if dq_report['completeness']['issues'] else f"{dq_report['valid_periods']}/{dq_report['total_periods']} periods valid"
+    continuity_details = ', '.join(dq_report['continuity']['issues']) if dq_report['continuity']['issues'] else "No gaps detected"
+    bounds_details = ', '.join(dq_report['bounds']['issues']) if dq_report['bounds']['issues'] else f"{dq_report['out_of_bounds_periods']} violations"
+
     return {
         'overall_score': dq_report['overall_score'],
         'passed': dq_report['passed'],
         'components': {
             'Completeness': {
                 'score': dq_report['completeness']['score'],
-                'details': f"{dq_report['completeness']['num_valid']}/{dq_report['completeness']['num_total']} records valid"
+                'details': completeness_details,
+                'passed': dq_report['completeness']['passed']
             },
             'Continuity': {
                 'score': dq_report['continuity']['score'],
-                'details': f"{dq_report['continuity']['num_gaps']} gaps detected (max: {dq_report['continuity']['max_gap_minutes']:.0f} min)"
+                'details': continuity_details,
+                'passed': dq_report['continuity']['passed']
             },
             'Bounds': {
                 'score': dq_report['bounds']['score'],
-                'details': f"{dq_report['bounds']['num_violations']} violations"
+                'details': bounds_details,
+                'passed': dq_report['bounds']['passed']
             },
             'Energy Reconciliation': {
                 'score': dq_report.get('energy_reconciliation', {}).get('score', 100),
-                'details': f"Error: {dq_report.get('energy_reconciliation', {}).get('reconciliation_error_percent', 0):.2f}%"
+                'details': ', '.join(dq_report.get('energy_reconciliation', {}).get('issues', [])) if dq_report.get('energy_reconciliation', {}).get('issues') else "Passed",
+                'passed': dq_report.get('energy_reconciliation', {}).get('passed', True)
             } if 'energy_reconciliation' in dq_report else None
         },
-        'recommendations': dq_report.get('recommendations', [])
+        'remediation_required': dq_report.get('remediation_required', []),
+        'total_periods': dq_report.get('total_periods', 0),
+        'valid_periods': dq_report.get('valid_periods', 0),
+        'missing_periods': dq_report.get('missing_periods', 0)
     }
