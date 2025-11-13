@@ -94,7 +94,7 @@ Examples:
         csv_loader = CSVLoader(config_dict)
         data_cleaner = DataCleaner(config_dict, dq_rules)
         price_selector = PriceSelector(price_rules)
-        dq_scorer = DataQualityScorer(config_dict, dq_rules, asset_config)
+        dq_scorer = DataQualityScorer(config_dict, dq_rules, asset_config, market_constraints)
         settlement_duration_min = config_dict['market']['settlement_duration_min']
         remediation_engine = RemediationEngine(dq_rules, settlement_duration_min)
         energy_recon = EnergyReconciliation(

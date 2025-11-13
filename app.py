@@ -19,6 +19,13 @@ from src.config_loader import get_config_loader
 from src.visualization.bess_charts import BESSVisualizer
 from src.modules.finance_kpis import FinanceKPICalculator
 from src.modules.om_kpis import OMKPICalculator
+from src.dashboard.dashboard_helpers import (
+    save_uploaded_file,
+    run_data_ingestion,
+    run_optimization,
+    format_dq_report,
+    validate_csv_structure
+)
 
 # Page configuration
 st.set_page_config(
@@ -63,6 +70,21 @@ if 'data_loaded' not in st.session_state:
     st.session_state.om_kpis = None
     st.session_state.asset_config = None
 
+    # Workflow state variables
+    st.session_state.uploaded_scada_path = None
+    st.session_state.uploaded_market_path = None
+    st.session_state.canonical_scada_path = None
+    st.session_state.canonical_market_path = None
+    st.session_state.scada_dq_score = None
+    st.session_state.market_dq_score = None
+    st.session_state.scada_dq_report = None
+    st.session_state.market_dq_report = None
+    st.session_state.remediation_applied = False
+    st.session_state.remediation_messages = []
+    st.session_state.optimization_status = None
+    st.session_state.workflow_stage = "upload"  # upload, processing, optimized, complete
+    st.session_state.selected_asset = None
+
 
 def load_data(summary_file, schedule_file):
     """Load optimization data and calculate KPIs"""
@@ -99,6 +121,433 @@ def load_data(summary_file, schedule_file):
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return None, None, None, None, None
+
+
+def show_data_upload():
+    """Data upload and processing page"""
+    st.markdown('<div class="main-header">📤 Data Upload & Processing</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    Welcome to the BESS Asset Intelligence Platform! Upload your raw SCADA and market price data
+    to begin the optimization workflow.
+    """)
+
+    st.markdown("---")
+
+    # Step 1: Asset Selection
+    st.subheader("Step 1: Select Asset")
+
+    config_loader = get_config_loader()
+    configs = config_loader.load_all_configs()
+    config_dict = configs['config'].model_dump()
+    asset_names = list(config_dict['bess_assets'].keys())
+
+    selected_asset = st.selectbox(
+        "Choose BESS Asset",
+        options=asset_names,
+        index=0,
+        key='asset_selector'
+    )
+
+    if selected_asset:
+        asset_config = config_dict['bess_assets'][selected_asset]
+        st.session_state.selected_asset = selected_asset
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Capacity", f"{asset_config['capacity_mwh']} MWh")
+        with col2:
+            st.metric("Power", f"{asset_config['power_mw']} MW")
+        with col3:
+            st.metric("RTE", f"{asset_config['rte_percent']}%")
+        with col4:
+            st.metric("Max Cycles/Day", f"{asset_config['warranty']['max_daily_cycles']}")
+
+    st.markdown("---")
+
+    # Step 2: File Upload
+    st.subheader("Step 2: Upload Data Files")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**SCADA Data (CSV)**")
+        st.markdown("Required columns: `timestamp`, `power_mw`, `soc_percent`")
+        scada_file = st.file_uploader(
+            "Upload SCADA CSV",
+            type=['csv'],
+            key='scada_upload',
+            help="Historical SCADA data with power and SoC measurements"
+        )
+
+        if scada_file is not None:
+            st.success(f"✅ {scada_file.name} uploaded ({scada_file.size / 1024:.1f} KB)")
+
+    with col2:
+        st.markdown("**Market Price Data (CSV)**")
+        st.markdown("Required columns: `timestamp`, `price_gbp_mwh`, `market_type`")
+        market_file = st.file_uploader(
+            "Upload Market Price CSV",
+            type=['csv'],
+            key='market_upload',
+            help="Market prices (day-ahead, imbalance, etc.)"
+        )
+
+        if market_file is not None:
+            st.success(f"✅ {market_file.name} uploaded ({market_file.size / 1024:.1f} KB)")
+
+    st.markdown("---")
+
+    # Step 3: Processing Controls
+    st.subheader("Step 3: Process Data")
+
+    remediate = st.checkbox(
+        "Enable Auto-Remediation",
+        value=True,
+        help="Automatically fix data quality issues (gaps ≤60 min, bounds violations)"
+    )
+
+    max_iterations = st.slider(
+        "Max Remediation Iterations",
+        min_value=1,
+        max_value=5,
+        value=3,
+        help="Number of attempts to improve data quality"
+    )
+
+    can_process = scada_file is not None and market_file is not None and selected_asset is not None
+
+    if st.button("🚀 Process Data", type="primary", disabled=not can_process):
+        if not can_process:
+            st.error("Please upload both SCADA and market data files and select an asset")
+        else:
+            # Save uploaded files
+            with st.spinner("Saving uploaded files..."):
+                scada_path = save_uploaded_file(scada_file, "data/raw")
+                market_path = save_uploaded_file(market_file, "data/raw")
+
+                st.session_state.uploaded_scada_path = scada_path
+                st.session_state.uploaded_market_path = market_path
+
+            # Validate CSV structure
+            st.info("Validating CSV structure...")
+            scada_valid, scada_error = validate_csv_structure(scada_path, 'scada')
+            market_valid, market_error = validate_csv_structure(market_path, 'market')
+
+            if not scada_valid:
+                st.error(f"❌ SCADA CSV validation failed: {scada_error}")
+                return
+
+            if not market_valid:
+                st.error(f"❌ Market CSV validation failed: {market_error}")
+                return
+
+            # Run data ingestion
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            status_text.text("Loading and cleaning data...")
+            progress_bar.progress(20)
+
+            result = run_data_ingestion(
+                scada_path=scada_path,
+                market_path=market_path,
+                asset_name=selected_asset,
+                remediate=remediate,
+                max_iterations=max_iterations
+            )
+
+            progress_bar.progress(60)
+            status_text.text("Scoring data quality...")
+
+            if result.success:
+                progress_bar.progress(100)
+                status_text.text("✅ Processing complete!")
+
+                # Store results in session state
+                st.session_state.canonical_scada_path = result.scada_canonical_path
+                st.session_state.canonical_market_path = result.market_canonical_path
+                st.session_state.scada_dq_score = result.scada_dq_score
+                st.session_state.market_dq_score = result.market_dq_score
+                st.session_state.scada_dq_report = result.scada_dq_report
+                st.session_state.market_dq_report = result.market_dq_report
+                st.session_state.remediation_applied = result.remediation_applied
+                st.session_state.remediation_messages = result.remediation_messages
+                st.session_state.workflow_stage = "processing"
+
+                st.success("🎉 Data processing successful!")
+
+                # Show DQ scores
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("SCADA DQ Score", f"{result.scada_dq_score:.1f}%",
+                             delta=f"{result.scada_dq_score - 80:.1f}%" if result.scada_dq_score >= 80 else None)
+                with col2:
+                    st.metric("Market DQ Score", f"{result.market_dq_score:.1f}%",
+                             delta=f"{result.market_dq_score - 80:.1f}%" if result.market_dq_score >= 80 else None)
+
+                if result.remediation_applied:
+                    st.info(f"ℹ️ Auto-remediation was applied ({len(result.remediation_messages)} fixes)")
+
+                st.markdown("**Canonical Files Created:**")
+                st.code(str(result.scada_canonical_path))
+                st.code(str(result.market_canonical_path))
+
+                st.info("👉 Go to **Optimization** page to run BESS optimization")
+
+            else:
+                progress_bar.progress(0)
+                status_text.text("")
+                st.error(f"❌ Data processing failed: {result.error_message}")
+
+                if result.scada_dq_score is not None:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("SCADA DQ Score", f"{result.scada_dq_score:.1f}%")
+                    with col2:
+                        st.metric("Market DQ Score", f"{result.market_dq_score:.1f}%")
+
+                st.warning("💡 Suggestions:")
+                st.markdown("""
+                - Enable auto-remediation if not already enabled
+                - Check for large data gaps (>60 minutes)
+                - Verify timestamp format (ISO8601 UTC required)
+                - Ensure power and SoC values are within valid bounds
+                """)
+
+    # Show current workflow state
+    if st.session_state.canonical_scada_path:
+        st.markdown("---")
+        st.subheader("✅ Processing Status")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"**SCADA DQ:** {st.session_state.scada_dq_score:.1f}%")
+            st.text(f"File: {Path(st.session_state.canonical_scada_path).name}")
+
+        with col2:
+            st.success(f"**Market DQ:** {st.session_state.market_dq_score:.1f}%")
+            st.text(f"File: {Path(st.session_state.canonical_market_path).name}")
+
+        if st.session_state.remediation_applied and st.session_state.remediation_messages:
+            with st.expander("View Remediation Details"):
+                for msg in st.session_state.remediation_messages:
+                    st.text(msg)
+
+
+def show_optimization():
+    """Optimization execution page"""
+    st.markdown('<div class="main-header">⚙️ BESS Optimization</div>', unsafe_allow_html=True)
+
+    if st.session_state.canonical_scada_path is None:
+        st.warning("⚠️ Please upload and process data first (go to **Data Upload** page)")
+        return
+
+    st.markdown(f"""
+    Ready to optimize **{st.session_state.selected_asset}** using cleaned data.
+    The MILP solver will find the optimal arbitrage strategy.
+    """)
+
+    st.markdown("---")
+
+    # DQ Score Summary
+    st.subheader("Data Quality Summary")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("SCADA DQ Score", f"{st.session_state.scada_dq_score:.1f}%")
+
+    with col2:
+        st.metric("Market DQ Score", f"{st.session_state.market_dq_score:.1f}%")
+
+    with col3:
+        dq_passed = (st.session_state.scada_dq_score >= 80 and
+                     st.session_state.market_dq_score >= 80)
+        if dq_passed:
+            st.success("✅ DQ Passed")
+        else:
+            st.error("❌ DQ Failed")
+
+    st.markdown("---")
+
+    # Optimization Settings
+    st.subheader("Optimization Settings")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Load initial SoC from canonical SCADA
+        if st.session_state.canonical_scada_path:
+            try:
+                scada_df = pd.read_csv(st.session_state.canonical_scada_path)
+                default_soc = float(scada_df['soc_percent'].iloc[0])
+            except:
+                default_soc = 50.0
+        else:
+            default_soc = 50.0
+
+        initial_soc = st.slider(
+            "Initial SoC (%)",
+            min_value=5.0,
+            max_value=95.0,
+            value=default_soc,
+            step=1.0,
+            help="Starting state of charge for optimization"
+        )
+
+    with col2:
+        solver_timeout = st.number_input(
+            "Solver Timeout (seconds)",
+            min_value=5,
+            max_value=300,
+            value=30,
+            step=5,
+            help="Maximum time for solver to find solution"
+        )
+
+    st.markdown("---")
+
+    # Run Optimization
+    if st.button("▶️ Run Optimization", type="primary", disabled=not dq_passed):
+        if not dq_passed:
+            st.error("Cannot run optimization: Data quality below 80% threshold")
+        else:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            status_text.text("Initializing optimizer...")
+            progress_bar.progress(10)
+
+            status_text.text("Loading cleaned data...")
+            progress_bar.progress(20)
+
+            status_text.text("Building MILP model...")
+            progress_bar.progress(40)
+
+            status_text.text("Running solver (this may take up to 30 seconds)...")
+            progress_bar.progress(50)
+
+            # Run optimization
+            result = run_optimization(
+                scada_file=st.session_state.canonical_scada_path,
+                market_file=st.session_state.canonical_market_path,
+                asset_name=st.session_state.selected_asset,
+                initial_soc_percent=initial_soc,
+                solver_name='PULP_CBC_CMD',
+                timeout=solver_timeout
+            )
+
+            if result.success:
+                progress_bar.progress(80)
+                status_text.text("Calculating KPIs...")
+
+                # Load configuration for KPI calculation
+                config_loader = get_config_loader()
+                configs = config_loader.load_all_configs()
+                config_dict = configs['config'].model_dump()
+                asset_config = config_dict['bess_assets'][st.session_state.selected_asset]
+                settlement_duration_min = config_dict['market']['settlement_duration_min']
+
+                # Calculate KPIs
+                finance_calc = FinanceKPICalculator(asset_config)
+                om_calc = OMKPICalculator(asset_config)
+
+                finance_kpis = finance_calc.calculate_kpis(result.summary, settlement_duration_min)
+                schedule_kpis = finance_calc.calculate_schedule_based_kpis(result.schedule_df)
+                finance_kpis.update(schedule_kpis)
+
+                om_kpis = om_calc.calculate_kpis(result.summary, result.schedule_df, settlement_duration_min)
+
+                progress_bar.progress(100)
+                status_text.text("✅ Optimization complete!")
+
+                # Store in session state
+                st.session_state.schedule_df = result.schedule_df
+                st.session_state.optimization_summary = result.summary
+                st.session_state.finance_kpis = finance_kpis
+                st.session_state.om_kpis = om_kpis
+                st.session_state.asset_config = asset_config
+                st.session_state.optimization_status = result.solver_status
+                st.session_state.workflow_stage = "complete"
+                st.session_state.data_loaded = True
+
+                st.success("🎉 Optimization successful!")
+
+                # Show key results
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Solver Status", result.solver_status)
+
+                with col2:
+                    st.metric("Solve Time", f"{result.solve_time:.2f}s")
+
+                with col3:
+                    actual_revenue = result.summary['actual_revenue_gbp']
+                    optimal_revenue = result.summary['optimal_revenue_gbp']
+                    st.metric("Actual Revenue", f"£{actual_revenue:,.0f}")
+
+                with col4:
+                    st.metric("Optimal Revenue", f"£{optimal_revenue:,.0f}",
+                             delta=f"£{optimal_revenue - actual_revenue:,.0f}")
+
+                st.markdown("---")
+
+                st.subheader("Optimization Summary")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Actual Performance**")
+                    st.markdown(f"- Revenue: £{actual_revenue:,.2f}")
+                    st.markdown(f"- Cycles: {result.summary['actual_performance']['cycles_used']:.2f}")
+                    st.markdown(f"- Discharge: {result.summary['actual_performance']['discharge_energy_mwh']:.2f} MWh")
+
+                with col2:
+                    st.markdown("**Optimal Performance**")
+                    st.markdown(f"- Revenue: £{optimal_revenue:,.2f}")
+                    st.markdown(f"- Cycles: {result.summary['cycles_used']:.2f}")
+                    st.markdown(f"- Discharge: {result.summary['optimal_discharge_energy_mwh']:.2f} MWh")
+
+                st.info("👉 View detailed analysis in **Finance Dashboard** and **O&M Dashboard** pages")
+
+            else:
+                progress_bar.progress(0)
+                status_text.text("")
+                st.error(f"❌ Optimization failed: {result.error_message}")
+
+                st.warning("💡 Troubleshooting:")
+                st.markdown("""
+                - Check if solver timeout is sufficient (increase if needed)
+                - Verify data quality scores are above 80%
+                - Ensure time series data has no large gaps
+                - Try with a shorter time horizon
+                """)
+
+    # Show current optimization status
+    if st.session_state.schedule_df is not None:
+        st.markdown("---")
+        st.subheader("✅ Optimization Status")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.success(f"**Status:** {st.session_state.optimization_status}")
+            st.text(f"Asset: {st.session_state.selected_asset}")
+
+        with col2:
+            st.success(f"**Periods Optimized:** {len(st.session_state.schedule_df)}")
+            duration_days = len(st.session_state.schedule_df) * 0.5 / 24  # 30-min periods
+            st.text(f"Duration: {duration_days:.1f} days")
+
+        # Schedule preview
+        with st.expander("View Schedule Preview (First 10 Periods)"):
+            st.dataframe(
+                st.session_state.schedule_df.head(10),
+                use_container_width=True,
+                hide_index=True
+            )
 
 
 def show_overview():
@@ -575,8 +1024,87 @@ def show_data_quality():
     """Data quality metrics page"""
     st.markdown('<div class="main-header">🔍 Data Quality</div>', unsafe_allow_html=True)
 
+    # Check if we have DQ reports from upload workflow
+    if st.session_state.scada_dq_report is not None:
+        st.subheader("Data Quality Scores")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            score = st.session_state.scada_dq_score
+            st.metric(
+                "SCADA DQ Score",
+                f"{score:.1f}%",
+                delta=f"{score - 80:.1f}%" if score >= 80 else None,
+                delta_color="normal" if score >= 80 else "inverse"
+            )
+
+        with col2:
+            score = st.session_state.market_dq_score
+            st.metric(
+                "Market DQ Score",
+                f"{score:.1f}%",
+                delta=f"{score - 80:.1f}%" if score >= 80 else None,
+                delta_color="normal" if score >= 80 else "inverse"
+            )
+
+        with col3:
+            both_passed = (st.session_state.scada_dq_score >= 80 and
+                          st.session_state.market_dq_score >= 80)
+            if both_passed:
+                st.success("✅ All DQ Checks Passed")
+            else:
+                st.error("❌ DQ Below Threshold")
+
+        st.markdown("---")
+
+        # SCADA DQ Breakdown
+        st.subheader("SCADA Data Quality Components")
+
+        if st.session_state.scada_dq_report:
+            formatted_report = format_dq_report(st.session_state.scada_dq_report)
+
+            cols = st.columns(4)
+            for idx, (component, data) in enumerate(formatted_report['components'].items()):
+                if data is not None:
+                    with cols[idx % 4]:
+                        st.metric(component, f"{data['score']:.1f}%")
+                        st.caption(data['details'])
+
+        st.markdown("---")
+
+        # Market DQ Breakdown
+        st.subheader("Market Data Quality Components")
+
+        if st.session_state.market_dq_report:
+            formatted_report = format_dq_report(st.session_state.market_dq_report)
+
+            cols = st.columns(3)
+            valid_components = [
+                (comp, data) for comp, data in formatted_report['components'].items()
+                if data is not None
+            ]
+
+            for idx, (component, data) in enumerate(valid_components):
+                with cols[idx % 3]:
+                    st.metric(component, f"{data['score']:.1f}%")
+                    st.caption(data['details'])
+
+        # Remediation Info
+        if st.session_state.remediation_applied:
+            st.markdown("---")
+            st.subheader("Remediation Applied")
+
+            st.info(f"✓ Auto-remediation was successfully applied ({len(st.session_state.remediation_messages)} fixes)")
+
+            with st.expander("View Remediation Details"):
+                for msg in st.session_state.remediation_messages:
+                    st.text(msg)
+
+        st.markdown("---")
+
     if not st.session_state.data_loaded:
-        st.warning("Please load optimization results from the sidebar first")
+        st.warning("Please process data through the **Data Upload** page or load optimization results from the sidebar")
         return
 
     schedule_df = st.session_state.schedule_df
@@ -640,7 +1168,7 @@ def main():
         # Navigation
         page = st.radio(
             "Navigate",
-            ["Overview", "Finance Dashboard", "O&M Dashboard", "Data Quality"],
+            ["Data Upload", "Optimization", "Overview", "Finance Dashboard", "O&M Dashboard", "Data Quality"],
             index=0
         )
 
@@ -701,7 +1229,11 @@ def main():
                 st.rerun()
 
     # Main content area
-    if page == "Overview":
+    if page == "Data Upload":
+        show_data_upload()
+    elif page == "Optimization":
+        show_optimization()
+    elif page == "Overview":
         show_overview()
     elif page == "Finance Dashboard":
         show_finance_dashboard()
