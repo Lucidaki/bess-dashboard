@@ -1,0 +1,33 @@
+[theme]
+# Primary accent color for interactive elements
+primaryColor = "#F0A202"
+
+# Background color for the main content area
+backgroundColor = "#FFFFFF"
+
+# Background color for sidebar and most interactive widgets
+secondaryBackgroundColor = "#F0F2F5"
+
+# Color used for text
+textColor = "#262730"
+
+# Font family for all text (use "sans serif", "serif", or "monospace")
+font = "sans serif"
+
+[server]
+# Max file upload size in MB
+maxUploadSize = 200
+
+# Max message size in MB
+maxMessageSize = 200
+
+# Enable file watching
+fileWatcherType = "auto"
+
+[browser]
+# Whether to send usage statistics
+gatherUsageStats = false
+
+# Title shown in browser tab
+serverAddress = "localhost"
+serverPort = 8501
